@@ -7,45 +7,65 @@ struct Block {
     timestamp: u64,
     data: String,
     previous_hash: String,
+    nonce: u64,
     hash: String,
 }
 
 impl Block {
-    fn new(index: u64, data: String, previous_hash: String) -> Self {
+    fn new(index: u64, data: String, previous_hash: String, difficulty: usize) -> Self {
         let timestamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .expect("Time went backwards")
             .as_secs();
 
-        let hash = Self::calculate_hash(index, timestamp, &data, &previous_hash);
-
-        Block {
+        // Inicializamos el bloque sin hash y sin nonce
+        let mut block = Block {
             index,
             timestamp,
             data,
             previous_hash,
-            hash,
-        }
+            nonce: 0,
+            hash: String::new(),
+        };
+
+        // Minamos el bloque
+        block.mine_block(difficulty);
+
+        block
     }
 
-    fn calculate_hash(index: u64, timestamp: u64, data: &str, previous_hash: &str) -> String {
-        let input = format!("{}{}{}{}", index, timestamp, data, previous_hash);
+    fn calculate_hash(&self) -> String {
+        let input = format!(
+            "{}{}{}{}{}",
+            self.index, self.timestamp, self.data, self.previous_hash, self.nonce
+        );
         let mut hasher = Sha256::new();
         hasher.update(input);
         format!("{:x}", hasher.finalize())
+    }
+
+    fn mine_block(&mut self, difficulty: usize) {
+        let target = "0".repeat(difficulty); // El hash debe empezar con este número de ceros
+        while !self.hash.starts_with(&target) {
+            self.nonce += 1;
+            self.hash = self.calculate_hash();
+        }
+        println!("Block mined with nonce {}: {}", self.nonce, self.hash);
     }
 }
 
 #[derive(Debug)]
 struct Blockchain {
     chain: Vec<Block>,
+    difficulty: usize, // Número de ceros requeridos
 }
 
 impl Blockchain {
-    fn new() -> Self {
-        let genesis_block = Block::new(0, "Genesis Block".to_string(), "0".to_string());
+    fn new(difficulty: usize) -> Self {
+        let genesis_block = Block::new(0, "Genesis Block".to_string(), "0".to_string(), difficulty);
         Blockchain {
             chain: vec![genesis_block],
+            difficulty,
         }
     }
 
@@ -55,6 +75,7 @@ impl Blockchain {
             previous_block.index + 1,
             data,
             previous_block.hash.clone(),
+            self.difficulty,
         );
         self.chain.push(new_block);
     }
@@ -68,14 +89,13 @@ impl Blockchain {
                 return false;
             }
 
-            let recalculated_hash = Block::calculate_hash(
-                current_block.index,
-                current_block.timestamp,
-                &current_block.data,
-                &current_block.previous_hash,
-            );
-
+            let recalculated_hash = current_block.calculate_hash();
             if current_block.hash != recalculated_hash {
+                return false;
+            }
+
+            // Validamos que el hash cumpla con la dificultad
+            if !current_block.hash.starts_with(&"0".repeat(self.difficulty)) {
                 return false;
             }
         }
@@ -84,7 +104,7 @@ impl Blockchain {
 }
 
 fn main() {
-    let mut blockchain = Blockchain::new();
+    let mut blockchain = Blockchain::new(4); // Dificultad: 4 ceros iniciales
 
     println!("Genesis Block: {:?}", blockchain.chain[0]);
 
