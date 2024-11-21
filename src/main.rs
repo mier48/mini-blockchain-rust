@@ -1,5 +1,7 @@
 use sha2::{Sha256, Digest};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{SystemTime, UNIX_EPOCH, Instant};
+use std::fs::File;
+use std::io::{Write, BufWriter};
 
 #[derive(Debug)]
 struct Block {
@@ -9,6 +11,7 @@ struct Block {
     previous_hash: String,
     nonce: u64,
     hash: String,
+    mining_time: u64, // Tiempo de minería en milisegundos
 }
 
 impl Block {
@@ -18,7 +21,6 @@ impl Block {
             .expect("Time went backwards")
             .as_secs();
 
-        // Inicializamos el bloque sin hash y sin nonce
         let mut block = Block {
             index,
             timestamp,
@@ -26,9 +28,9 @@ impl Block {
             previous_hash,
             nonce: 0,
             hash: String::new(),
+            mining_time: 0,
         };
 
-        // Minamos el bloque
         block.mine_block(difficulty);
 
         block
@@ -45,12 +47,21 @@ impl Block {
     }
 
     fn mine_block(&mut self, difficulty: usize) {
-        let target = "0".repeat(difficulty); // El hash debe empezar con este número de ceros
+        let target = "0".repeat(difficulty);
+        let start_time = Instant::now();
+
         while !self.hash.starts_with(&target) {
             self.nonce += 1;
             self.hash = self.calculate_hash();
         }
-        println!("Block mined with nonce {}: {}", self.nonce, self.hash);
+
+        let elapsed_time = start_time.elapsed();
+        self.mining_time = elapsed_time.as_millis() as u64;
+
+        println!(
+            "Block mined with nonce {}: {} (Mining time: {} ms)",
+            self.nonce, self.hash, self.mining_time
+        );
     }
 }
 
@@ -58,9 +69,9 @@ impl Block {
 struct Blockchain {
     chain: Vec<Block>,
     difficulty: usize,
-    time_target: u64,         // Tiempo objetivo en segundos
-    adjustment_interval: usize, // Intervalo de ajuste
-    last_adjustment_time: u64,  // Tiempo del último ajuste
+    time_target: u64,
+    adjustment_interval: usize,
+    last_adjustment_time: u64,
 }
 
 impl Blockchain {
@@ -79,7 +90,6 @@ impl Blockchain {
     }
 
     fn add_block(&mut self, data: String) {
-        // Recalcular dificultad si se alcanza el intervalo de ajuste
         if self.chain.len() % self.adjustment_interval == 0 {
             self.adjust_difficulty();
         }
@@ -100,16 +110,13 @@ impl Blockchain {
             .expect("Time went backwards")
             .as_secs();
 
-        // Tiempo total desde el último ajuste
         let time_elapsed = current_time - self.last_adjustment_time;
-
-        // Calcula el tiempo esperado para el intervalo
         let expected_time = self.time_target * self.adjustment_interval as u64;
 
         if time_elapsed < expected_time {
-            self.difficulty += 1; // Incrementar dificultad si fue más rápido
+            self.difficulty += 1;
         } else if self.difficulty > 1 {
-            self.difficulty -= 1; // Reducir dificultad si fue más lento
+            self.difficulty -= 1;
         }
 
         println!(
@@ -117,7 +124,7 @@ impl Blockchain {
             self.difficulty, time_elapsed, expected_time
         );
 
-        self.last_adjustment_time = current_time; // Actualizar el último ajuste
+        self.last_adjustment_time = current_time;
     }
 
     fn is_valid(&self) -> bool {
@@ -134,19 +141,37 @@ impl Blockchain {
                 return false;
             }
 
-            // Validamos que el hash cumpla con la dificultad
             if !current_block.hash.starts_with(&"0".repeat(self.difficulty)) {
                 return false;
             }
         }
         true
     }
+
+    fn average_mining_time(&self) -> f64 {
+        let total_time: u64 = self.chain.iter().map(|block| block.mining_time).sum();
+        total_time as f64 / self.chain.len() as f64
+    }
+
+    fn save_mining_stats(&self, filename: &str) {
+        let file = File::create(filename).expect("Unable to create file");
+        let mut writer = BufWriter::new(file);
+
+        writer
+            .write_all(b"Index,Mining Time (ms),Hash\n")
+            .expect("Unable to write headers");
+
+        for block in &self.chain {
+            let line = format!("{},{},{}\n", block.index, block.mining_time, block.hash);
+            writer.write_all(line.as_bytes()).expect("Unable to write data");
+        }
+
+        println!("Mining statistics saved to {}", filename);
+    }
 }
 
 fn main() {
-    let mut blockchain = Blockchain::new(4, 10, 3); // Dificultad inicial, tiempo objetivo (10s), ajuste cada 3 bloques
-
-    println!("Genesis Block: {:?}", blockchain.chain[0]);
+    let mut blockchain = Blockchain::new(4, 10, 3); // Dificultad inicial: 4, tiempo objetivo: 10s, ajuste cada 3 bloques
 
     blockchain.add_block("Block 1: Hello, Blockchain!".to_string());
     blockchain.add_block("Block 2: Learning Rust is fun.".to_string());
@@ -156,8 +181,13 @@ fn main() {
 
     println!("\nBlockchain:");
     for block in &blockchain.chain {
-        println!("{:?}", block);
+        println!(
+            "Block {} mined in {} ms: Hash = {}",
+            block.index, block.mining_time, block.hash
+        );
     }
 
-    println!("\nIs blockchain valid? {}", blockchain.is_valid());
+    println!("\nAverage mining time: {:.2} ms", blockchain.average_mining_time());
+
+    blockchain.save_mining_stats("mining_stats.csv");
 }
